@@ -114,7 +114,7 @@ class TubeUp(object):
         if self.download_both_formats:
             format_strings = [
                 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best',
-                'bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]'
+                'bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/bestvideo+bestaudio/best'
             ]
         else:
             format_strings = [None]  # Use default format from generate_ydl_options
