@@ -27,24 +27,27 @@ class TubeUp(object):
                  verbose=False,
                  dir_path='~/.tubeup',
                  ia_config_path=None,
-                 output_template=None):
+                 output_template=None,
+                 download_both_formats=False):
         """
         `tubeup` is a tool to archive YouTube by downloading the videos and
         uploading it back to the archive.org.
 
-        :param verbose:         A boolean, True means all loggings will be
-                                printed out to stdout.
-        :param dir_path:        A path to directory that will be used for
-                                saving the downloaded resources. Default to
-                               '~/.tubeup'.
-        :param ia_config_path:  Path to an internetarchive config file, will
-                                be used in uploading the file.
-        :param output_template: A template string that will be used to
-                                generate the output filenames.
+        :param verbose:              A boolean, True means all loggings will be
+                                     printed out to stdout.
+        :param dir_path:             A path to directory that will be used for
+                                     saving the downloaded resources. Default to
+                                    '~/.tubeup'.
+        :param ia_config_path:       Path to an internetarchive config file, will
+                                     be used in uploading the file.
+        :param output_template:      A template string that will be used to
+                                     generate the output filenames.
+        :param download_both_formats: If True, downloads both MP4 and WebM formats.
         """
         self.dir_path = dir_path
         self.verbose = verbose
         self.ia_config_path = ia_config_path
+        self.download_both_formats = download_both_formats
         self.logger = getLogger(__name__)
         if output_template is None:
             self.output_template = '%(id)s.%(ext)s'
@@ -107,87 +110,101 @@ class TubeUp(object):
         """
         downloaded_files_basename = set()
 
-        def check_if_ia_item_exists(infodict):
-            itemname = get_itemname(infodict)
-            item = internetarchive.get_item(itemname)
-            if item.exists and self.verbose:
-                print("\n:: Item already exists. Not downloading.")
-                print('Title: %s' % infodict['title'])
-                print('Video URL: %s\n' % infodict['webpage_url'])
-                return True
-            return False
+        # Determine which formats to download
+        if self.download_both_formats:
+            format_strings = [
+                'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best',
+                'bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]'
+            ]
+        else:
+            format_strings = [None]  # Use default format from generate_ydl_options
 
-        def ydl_progress_each(entry):
-            if not entry:
-                self.logger.warning('Video "%s" is not available. Skipping.' % url)
-                return
-            if ydl.in_download_archive(entry):
-                return
-            if not check_if_ia_item_exists(entry):
-                ydl.extract_info(entry['webpage_url'])
-                downloaded_files_basename.update(self.create_basenames_from_ydl_info_dict(ydl, entry))
-            else:
-                ydl.record_download_archive(entry)
+        for format_string in format_strings:
+            if self.verbose and format_string:
+                print(f"\n:: Downloading format: {format_string}")
 
-        def ydl_progress_hook(d):
-            if d['status'] == 'downloading' and self.verbose:
-                if d.get('_total_bytes_str') is not None:
-                    msg_template = ('%(_percent_str)s of %(_total_bytes_str)s '
-                                    'at %(_speed_str)s ETA %(_eta_str)s')
-                elif d.get('_total_bytes_estimate_str') is not None:
-                    msg_template = ('%(_percent_str)s of '
-                                    '~%(_total_bytes_estimate_str)s at '
-                                    '%(_speed_str)s ETA %(_eta_str)s')
-                elif d.get('_downloaded_bytes_str') is not None:
-                    if d.get('_elapsed_str'):
-                        msg_template = ('%(_downloaded_bytes_str)s at '
-                                        '%(_speed_str)s (%(_elapsed_str)s)')
-                    else:
-                        msg_template = ('%(_downloaded_bytes_str)s '
-                                        'at %(_speed_str)s')
+            def check_if_ia_item_exists(infodict):
+                itemname = get_itemname(infodict)
+                item = internetarchive.get_item(itemname)
+                if item.exists and self.verbose:
+                    print("\n:: Item already exists. Not downloading.")
+                    print('Title: %s' % infodict['title'])
+                    print('Video URL: %s\n' % infodict['webpage_url'])
+                    return True
+                return False
+
+            def ydl_progress_each(entry):
+                if not entry:
+                    self.logger.warning('Video "%s" is not available. Skipping.' % url)
+                    return
+                if ydl.in_download_archive(entry):
+                    return
+                if not check_if_ia_item_exists(entry):
+                    ydl.extract_info(entry['webpage_url'])
+                    downloaded_files_basename.update(self.create_basenames_from_ydl_info_dict(ydl, entry))
                 else:
-                    msg_template = ('%(_percent_str)s % at '
-                                    '%(_speed_str)s ETA %(_eta_str)s')
+                    ydl.record_download_archive(entry)
 
-                process_msg = '\r[download] ' + (msg_template % d) + '\033[K'
-                sys.stdout.write(process_msg)
-                sys.stdout.flush()
-
-            if d['status'] == 'finished':
-                msg = '\nDownloaded %s' % d['filename']
-
-                self.logger.debug(d)
-                self.logger.info(msg)
-                if self.verbose:
-                    print(msg)
-
-            if d['status'] == 'error':
-                # TODO: Complete the error message
-                msg = 'Error when downloading the video'
-
-                self.logger.error(msg)
-                if self.verbose:
-                    print(msg)
-
-        ydl_opts = self.generate_ydl_options(ydl_progress_hook,
-                                             cookie_file, proxy_url,
-                                             ydl_username, ydl_password,
-                                             use_download_archive)
-
-        with YoutubeDL(ydl_opts) as ydl:
-            for url in urls:
-                if not ignore_existing_item:
-                    # Get the info dict of the url
-                    info_dict = ydl.extract_info(url, download=False)
-
-                    if info_dict.get('_type', 'video') == 'playlist':
-                        for entry in info_dict['entries']:
-                            ydl_progress_each(entry)
+            def ydl_progress_hook(d):
+                if d['status'] == 'downloading' and self.verbose:
+                    if d.get('_total_bytes_str') is not None:
+                        msg_template = ('%(_percent_str)s of %(_total_bytes_str)s '
+                                        'at %(_speed_str)s ETA %(_eta_str)s')
+                    elif d.get('_total_bytes_estimate_str') is not None:
+                        msg_template = ('%(_percent_str)s of '
+                                        '~%(_total_bytes_estimate_str)s at '
+                                        '%(_speed_str)s ETA %(_eta_str)s')
+                    elif d.get('_downloaded_bytes_str') is not None:
+                        if d.get('_elapsed_str'):
+                            msg_template = ('%(_downloaded_bytes_str)s at '
+                                            '%(_speed_str)s (%(_elapsed_str)s)')
+                        else:
+                            msg_template = ('%(_downloaded_bytes_str)s '
+                                            'at %(_speed_str)s')
                     else:
-                        ydl_progress_each(info_dict)
-                else:
-                    info_dict = ydl.extract_info(url)
-                    downloaded_files_basename.update(self.create_basenames_from_ydl_info_dict(ydl, info_dict))
+                        msg_template = ('%(_percent_str)s % at '
+                                        '%(_speed_str)s ETA %(_eta_str)s')
+
+                    process_msg = '\r[download] ' + (msg_template % d) + '\033[K'
+                    sys.stdout.write(process_msg)
+                    sys.stdout.flush()
+
+                if d['status'] == 'finished':
+                    msg = '\nDownloaded %s' % d['filename']
+
+                    self.logger.debug(d)
+                    self.logger.info(msg)
+                    if self.verbose:
+                        print(msg)
+
+                if d['status'] == 'error':
+                    # TODO: Complete the error message
+                    msg = 'Error when downloading the video'
+
+                    self.logger.error(msg)
+                    if self.verbose:
+                        print(msg)
+
+            ydl_opts = self.generate_ydl_options(ydl_progress_hook,
+                                                 cookie_file, proxy_url,
+                                                 ydl_username, ydl_password,
+                                                 use_download_archive,
+                                                 format_string=format_string)
+
+            with YoutubeDL(ydl_opts) as ydl:
+                for url in urls:
+                    if not ignore_existing_item:
+                        # Get the info dict of the url
+                        info_dict = ydl.extract_info(url, download=False)
+
+                        if info_dict.get('_type', 'video') == 'playlist':
+                            for entry in info_dict['entries']:
+                                ydl_progress_each(entry)
+                        else:
+                            ydl_progress_each(info_dict)
+                    else:
+                        info_dict = ydl.extract_info(url)
+                        downloaded_files_basename.update(self.create_basenames_from_ydl_info_dict(ydl, info_dict))
 
         self.logger.debug(
             'Basenames obtained from url (%s): %s'
@@ -234,7 +251,8 @@ class TubeUp(object):
                              ydl_username=None,
                              ydl_password=None,
                              use_download_archive=False,
-                             ydl_output_template=None):
+                             ydl_output_template=None,
+                             format_string=None):
         """
         Generate a dictionary that contains options that will be used
         by yt-dlp.
@@ -251,9 +269,13 @@ class TubeUp(object):
                                       This will download only videos not listed in
                                       the archive file. Record the IDs of all
                                       downloaded videos in it.
+        :param format_string:         Format string for yt-dlp video selection.
         :return:                      A dictionary that contains options that will
                                       be used by youtube_dl.
         """
+        if format_string is None:
+            format_string = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best'
+        
         ydl_opts = {
             'outtmpl': os.path.join(self.dir_path['downloads'],
                                     self.output_template),
@@ -275,6 +297,7 @@ class TubeUp(object):
             'fixup': 'detect_or_warn',
             'nooverwrites': True,
             'consoletitle': True,
+            'format': format_string,
             'logger': self.logger,
             'progress_hooks': [ydl_progress_hook]
         }
