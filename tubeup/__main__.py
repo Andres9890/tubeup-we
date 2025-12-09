@@ -91,7 +91,8 @@ def main():
     metadata = key_value_to_dict(args['--metadata'])
 
     tu = TubeUp(verbose=not quiet_mode,
-                output_template=args['--output'])
+                output_template=args['--output'],
+                download_both_formats=True)
 
     try:
         for identifier, meta in tu.archive_urls(URLs, metadata,
