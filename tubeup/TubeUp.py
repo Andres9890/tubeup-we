@@ -120,9 +120,6 @@ class TubeUp(object):
             format_strings = [None]  # Use default format from generate_ydl_options
 
         for format_string in format_strings:
-            if self.verbose and format_string:
-                print(f"\n:: Downloading format: {format_string}")
-
             def check_if_ia_item_exists(infodict):
                 itemname = get_itemname(infodict)
                 item = internetarchive.get_item(itemname)
